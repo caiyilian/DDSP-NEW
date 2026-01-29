@@ -13,6 +13,7 @@ from utils.utils import (
     AverageMeter, LogWriter, K_fold_data_gen, K_fold_file_gen, dice,
     selfchannel_loss, crosschannel_sim, context_mask_mul, update_ema_variables,
     PrototypeBank, compute_centroids, prototype_contrastive_loss, structural_consistency_loss)
+from utils.sam_refine import initialize_sam_model, sam_refine_pseudo_labels
 from utils import ramps
 import numpy as np
 import surface_distance as surfdist
@@ -53,6 +54,18 @@ class DDSPSeg(object):
         self.scco = args.scco
         self.threshold = 0.95
         self.best_dice = 0
+        
+        # SAM-S2CPL: Initialize SAM-Med3D for pseudo-label refinement
+        self.use_sam_refine = args.use_sam_refine
+        self.sam_model = None
+        if self.use_sam_refine and args.sam_checkpoint is not None:
+            print("Initializing SAM-Med3D for pseudo-label refinement...")
+            self.sam_model = initialize_sam_model(
+                checkpoint_path=args.sam_checkpoint,
+                device=self.device,
+                model_type='vit_b_ori'  # Uses 128x128x128 input
+            )
+            print("SAM-Med3D initialized successfully (frozen parameters)")
 
         A_root = args.A_root
         B_root = args.B_root
@@ -205,6 +218,21 @@ class DDSPSeg(object):
             # 24.12.6  1:28     没关系了，反正要和DDSP一致，方便操作
             self.pseudo_label = self.pseudo_label[0]
             self.tar_mask = (prob > self.threshold)[0].float()  # 目标域可信度图 w
+            
+            # ======================== SAM-S2CPL: Structural Refinement ========================
+            # Use SAM-Med3D to refine pseudo-label boundaries using high-confidence seeds
+            if self.use_sam_refine and self.sam_model is not None:
+                self.pseudo_label = sam_refine_pseudo_labels(
+                    sam_model=self.sam_model,
+                    image=self.tar_img,
+                    pseudo_label=self.pseudo_label,
+                    confidence_mask=self.tar_mask,
+                    n_classes=self.n_classes,
+                    device=self.device,
+                    num_clicks=1
+                )
+            # ==================================================================================
+            
             self.tar_mask_semantic = (self.pseudo_label & self.tar_mask.bool()).bool()
 
             # 应用了CP的源域图像生成伪标签，也就是说，中间某个块被CP替换成目标域
@@ -656,6 +684,12 @@ if __name__ == '__main__':
     parser.add_argument('---pretrain_ckpt_path', default='./checkpoint/pretrain_ct_96', help='load path of pretrained ckpt')
     parser.add_argument('--resume', default=False, help='resume or not')
     parser.add_argument('--load_resume_path', default=None, help='load path of ckpt for resume')
+
+    # SAM-S2CPL: SAM-driven Structure-Semantic Collaborative Pseudo-Labeling
+    parser.add_argument('--use_sam_refine', action='store_true', default=False,
+                        help='Enable SAM-Med3D for pseudo-label structural refinement')
+    parser.add_argument('--sam_checkpoint', type=str, default=None,
+                        help='Path to SAM-Med3D checkpoint (e.g., sam_med3d_turbo.pth)')
 
     args = parser.parse_args()
 
