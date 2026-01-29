@@ -1,0 +1,111 @@
+SAM_Med3D(
+  (image_encoder): ImageEncoderViT3D(
+    (patch_embed): PatchEmbed3D(
+      (proj): Conv3d(1, 768, kernel_size=(16, 16, 16), stride=(16, 16, 16))
+    )
+    (blocks): ModuleList(
+      (0-11): 12 x Block3D(
+        (norm1): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+        (attn): Attention(
+          (qkv): Linear(in_features=768, out_features=2304, bias=True)
+          (proj): Linear(in_features=768, out_features=768, bias=True)
+        )
+        (norm2): LayerNorm((768,), eps=1e-06, elementwise_affine=True)
+        (mlp): MLPBlock(
+          (lin1): Linear(in_features=768, out_features=3072, bias=True)
+          (lin2): Linear(in_features=3072, out_features=768, bias=True)
+          (act): GELU(approximate='none')
+        )
+      )
+    )
+    (neck): Sequential(
+      (0): Conv3d(768, 384, kernel_size=(1, 1, 1), stride=(1, 1, 1), bias=False)
+      (1): LayerNorm3d()
+      (2): Conv3d(384, 384, kernel_size=(3, 3, 3), stride=(1, 1, 1), padding=(1, 1, 1), bias=False)
+      (3): LayerNorm3d()
+    )
+  )
+  (prompt_encoder): PromptEncoder3D(
+    (pe_layer): PositionEmbeddingRandom3D()
+    (point_embeddings): ModuleList(
+      (0-1): 2 x Embedding(1, 384)
+    )
+    (not_a_point_embed): Embedding(1, 384)
+    (mask_downscaling): Sequential(
+      (0): Conv3d(1, 4, kernel_size=(2, 2, 2), stride=(2, 2, 2))
+      (1): LayerNorm3d()
+      (2): GELU(approximate='none')
+      (3): Conv3d(4, 16, kernel_size=(2, 2, 2), stride=(2, 2, 2))
+      (4): LayerNorm3d()
+      (5): GELU(approximate='none')
+      (6): Conv3d(16, 384, kernel_size=(1, 1, 1), stride=(1, 1, 1))
+    )
+    (no_mask_embed): Embedding(1, 384)
+  )
+  (mask_decoder): MaskDecoder3D(
+    (transformer): TwoWayTransformer3D(
+      (layers): ModuleList(
+        (0-1): 2 x TwoWayAttentionBlock3D(
+          (self_attn): DownscaleAttention(
+            (q_proj): Linear(in_features=384, out_features=384, bias=True)
+            (k_proj): Linear(in_features=384, out_features=384, bias=True)
+            (v_proj): Linear(in_features=384, out_features=384, bias=True)
+            (out_proj): Linear(in_features=384, out_features=384, bias=True)
+          )
+          (norm1): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+          (cross_attn_token_to_image): DownscaleAttention(
+            (q_proj): Linear(in_features=384, out_features=192, bias=True)
+            (k_proj): Linear(in_features=384, out_features=192, bias=True)
+            (v_proj): Linear(in_features=384, out_features=192, bias=True)
+            (out_proj): Linear(in_features=192, out_features=384, bias=True)
+          )
+          (norm2): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+          (mlp): MLPBlock(
+            (lin1): Linear(in_features=384, out_features=2048, bias=True)
+            (lin2): Linear(in_features=2048, out_features=384, bias=True)
+            (act): ReLU()
+          )
+          (norm3): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+          (norm4): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+          (cross_attn_image_to_token): DownscaleAttention(
+            (q_proj): Linear(in_features=384, out_features=192, bias=True)
+            (k_proj): Linear(in_features=384, out_features=192, bias=True)
+            (v_proj): Linear(in_features=384, out_features=192, bias=True)
+            (out_proj): Linear(in_features=192, out_features=384, bias=True)
+          )
+        )
+      )
+      (final_attn_token_to_image): DownscaleAttention(
+        (q_proj): Linear(in_features=384, out_features=192, bias=True)
+        (k_proj): Linear(in_features=384, out_features=192, bias=True)
+        (v_proj): Linear(in_features=384, out_features=192, bias=True)
+        (out_proj): Linear(in_features=192, out_features=384, bias=True)
+      )
+      (norm_final_attn): LayerNorm((384,), eps=1e-05, elementwise_affine=True)
+    )
+    (iou_token): Embedding(1, 384)
+    (mask_tokens): Embedding(4, 384)
+    (output_upscaling): Sequential(
+      (0): ConvTranspose3d(384, 96, kernel_size=(2, 2, 2), stride=(2, 2, 2))
+      (1): LayerNorm3d()
+      (2): GELU(approximate='none')
+      (3): ConvTranspose3d(96, 48, kernel_size=(2, 2, 2), stride=(2, 2, 2))
+      (4): GELU(approximate='none')
+    )
+    (output_hypernetworks_mlps): ModuleList(
+      (0-3): 4 x MLP(
+        (layers): ModuleList(
+          (0-1): 2 x Linear(in_features=384, out_features=384, bias=True)
+          (2): Linear(in_features=384, out_features=48, bias=True)
+        )
+      )
+    )
+    (iou_prediction_head): MLP(
+      (layers): ModuleList(
+        (0): Linear(in_features=384, out_features=256, bias=True)
+        (1): Linear(in_features=256, out_features=256, bias=True)
+        (2): Linear(in_features=256, out_features=4, bias=True)
+      )
+    )
+  )
+)

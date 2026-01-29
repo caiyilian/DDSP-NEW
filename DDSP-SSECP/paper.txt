@@ -1,0 +1,578 @@
+\documentclass[lettersize,journal]{IEEEtran}
+\usepackage{amsmath,amsfonts}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{array}
+\usepackage[caption=false,font=normalsize,labelfont=sf,textfont=sf]{subfig}
+\usepackage{textcomp}
+\usepackage{stfloats}
+\usepackage{url} 
+\usepackage{verbatim}
+\usepackage{graphicx}
+\usepackage{cite}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage[table]{xcolor}
+\hyphenation{op-tical net-works semi-conduc-tor IEEE-Xplore}
+% updated with editorial comments 8/9/2021
+
+\begin{document}
+
+\title{SPIDA: Unsupervised Semantic-Preserving Intermediate Domain Adaptation for Medical Image Segmentation}
+
+
+\author{Yang Wen, Bai Chen, Wuzhen Shi, \IEEEmembership{Senior Member, IEEE}, Bin Sheng, \IEEEmembership{Senior Member, IEEE}, Wenming Cao, \IEEEmembership{Senior Member, IEEE} and Xiaokang Yang, \IEEEmembership{Fellow, IEEE}
+\thanks{This work was supported in part by the National Natural Science Foundation of China under Grant Nos. 62301330 and
+62101346, in part by the Guangdong Basic and Applied Basic Research Foundation under Grant Nos. 2024A1515010496 and 2022A1515110101, in part by the Stable Support Plan for Shenzhen Higher Education Institutions under Grant No. 20231121103807001, and in part by the Guangdong Provincial Key Laboratory under Grant Nos. 2023B1212060076.
+(Corresponding author: Wuzhen Shi.)}% <-this % stops a space
+\thanks{Yang Wen, Bai Chen, Wuzhen Shi and Wenming Cao are with Guangdong Provincial Key Laboratory of Intelligent Information Processing, College of Electronics and Information Engineering, Shenzhen University, Shenzhen, China (email: wen\_yang@szu.edu.cn; 2310433036@email.szu.edu.cn; wzhshi@szu.edu.cn; wmcao@szu.edu.cn).}
+\thanks{Bin Sheng is with the Department of Computer Science and Engineering, Shanghai Jiao Tong University, Shanghai, China (email: shengbin@sjtu.edu.cn).}
+\thanks{Xiaokang Yang is with AI Institute, Shanghai Jiao
+Tong University, Shanghai, China (email: xkyang@sjtu.edu.cn)}
+\thanks{Manuscript received August 14, 2024; revised August 16, 2024.}}
+
+
+% The paper headers
+\markboth{Journal of \LaTeX\ Class Files,~Vol.~14, No.~8, August~2021}%
+{Shell \MakeLowercase{\textit{et al.}}: A Sample Article Using IEEEtran.cls for IEEE Journals}
+
+% \IEEEpubid{0000--0000/00\$00.00~\copyright~2024 IEEE}
+% Remember, if you use this you must call \IEEEpubidadjcol in the second
+% column for its text to clear the IEEEpubid mark.
+
+\maketitle
+\begin{abstract}
+    Recent unsupervised domain adaptation (UDA) methods construct an intermediate domain with diverse data through data augmentation to encourage the model to focus on domain-invariant features, thereby enhancing adaptation capabilities in unsupervised cross-domain medical image segmentation.  
+    However, weak data augmentations that do not change the relative relationship of the image distribution are difficult to achieve cross-domain information transformation, while overly strong augmentations cause significant destruction to semantic information, thereby limiting the model's capabilities in segmenting unlabeled data in the target domain. 
+    To address this issue, we propose a Patches Interacting Mapping (PIM) method to construct a semantic-preserving intermediate domain that has the semantic information from both the source and target domains, effectively enhancing the generalization ability and narrowing the domain gap. 
+    To mitigate the lack of semantic guidance in the unlabeled target domain, we introduce a cross-domain label merging strategy to generate reliable pseudo-labels that incorporate knowledge from both source and target domains. 
+    Furthermore, we introduce dual-domain semantic feature alignment on the source and target domains simultaneously, further enhancing the segmentation performance in the unlabeled target domain. Comprehensive comparative experiments prove that our proposed method outperforms existing UDA methods on whole heart structure and prostate segmentation tasks.
+
+\end{abstract}
+
+\begin{IEEEkeywords}
+Unsupervised domain adaptation, Medical image segmentation, pseudo labels.
+\end{IEEEkeywords}
+
+% \IEEEpubidadjcol
+\section{Introduction}
+% 第一段：讲DL在UDA的困难以及UDA现状
+Deep learning methods have shown remarkable performance in medical image segmentation tasks~\cite{cciccek20163d,2023Weakly} when training and testing data are drawn from the same distribution. However, medical images are frequently sourced from various institutions, utilizing different scanners with different parameters or in different modalities, which causes domain shifts. Additionally, due to the expensive and time-consuming labeling procedure, the annotated medical datasets are scarce~\cite{kumari2024deep,2024Federated}, which limits the effective application of deep learning models in medical image segmentation. To address this problem, unsupervised domain adaptation (UDA) techniques have been developed to transfer knowledge from labeled source domains to unlabeled target domains.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{fig/aug_insts.pdf}
+\caption{The left four figures display augmentation instances by weak and strong data augmentations. (a) The original image from the CT domain. (b) The augmented images by Copy-Paste (CP)~\protect\cite{ghiasi2021simple}, where the cropped region is highlighted by green box. (c) and (d) are augmented images by Shuffle Remap (SR)~\protect\cite{kong2023indescribable}, which lose semantic information. 
+The right four figures show the segmentation results using SR~\cite{kong2023indescribable} and our proposed PIM. (e) The original image from MR domain. (f) The ground truth label. (g) Segmentation result of SR, which fails to capture the whole structure of ascending aorta cropped in the red box. (h) Segmentation result of PIM, which captures the whole structure of the ascending aorta. 
+}
+\label{data aug}
+\end{figure}
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{fig/aug_tsne_visual.pdf}
+\caption{Data distribution visualization of source, target, and the transformed intermediate domain.
+(a) Visualized data distribution generated by Copy-Paste~\cite{ghiasi2021simple}, (b) Visualized data distribution generated by the descending B\'ezier curve~\cite{zhou2022generalizable}. (c) Visualized data distribution generated by Shuffle Remap~\cite{kong2023indescribable}. (d) Data distribution generated by the proposed PIM. S denotes the source domain, T denotes the target domain, $S\rightarrow T$ denotes the intermediate domain generated from the source domain, and $T\rightarrow S$ denotes the intermediate domain generated from the target domain. It can be observed that the intermediate domain $S \to T$ and $T \to S$ produced by PIM intersect with the target domain $T$ and the source domain $S$, indicating that our method can effectively transfer information from original domains to intermediate domains and thus alleviating domain gaps between source and target domains. }
+\label{tsne}
+\end{figure}
+
+% 第二段：Data Augmentation不足
+Recently, some research~\cite{zhou2022generalizable,ma2024constructing,zheng2024dual} has explored increasing the diversity of data by constructing an intermediate domain through data augmentations to improve the generalizability of models on unlabeled target domains.
+However, existing methods either employ weak data augmentation or overly strong data augmentation to construct the intermediate domain. The weak data augmentations, such as Copy-Paste (CP)~\cite{ghiasi2021simple} and affine transformation, struggle to produce cross-domain data with diversity. On the other hand, the overly strong augmentations, such as the descending B\'ezier curve~\cite{zhou2022generalizable} and Shuffle Remap (SR)~\cite{kong2023indescribable}, can cause significant damage to semantic information due to the intrinsic randomness in mapping to the original image distribution.
+As shown in Fig. \ref{data aug}, the CP-based augmented image presents almost the same style as its corresponding original data, whereas the SR-based augmented images deviate significantly from the original ones.
+Furthermore, as visualized in Fig. \ref{tsne}, the intermediate domain constructed by the descending B\'ezier curve or SR overlaps minimally with the target domain, indicating the existence of a large domain gap.
+
+% 第三段：Pseudo-Label不足
+To deal with the problem of no annotated data in the target domain, pseudo-labeling is a widely used technique in UDA. 
+Previous works~\cite{wu2023upl,li2024robust} have proved that generating pseudo labels can effectively transfer source-domain knowledge to the unlabeled target domain. 
+For example, the Mean Teacher framework~\cite{tarvainen2017mean} is frequently applied in UDA~\cite{shin2023sdc,zhang2024mapseg}. 
+Unfortunately, the lack of direct guidance from ground-truth labels and the domain gap between the source and target domains hinder the model from producing high-quality pseudo labels for the unlabeled data.
+
+% 第四段：Feature Alignment不足
+Another critical aspect of UDA is feature alignment, with the aim of learning domain-invariant features to reduce the distance between the source and target domains. To achieve this goal, most of the existing UDA methods~\cite{chen2020unsupervised,sun2022rethinking,shin2023sdc} implement Generative Adversarial Network~\cite{goodfellow2020generative} (GAN) or GAN-like modules~\cite{2022Enhanced,cao2023autoencoder} for implicit alignment in the pixel space or feature space. While achieving certain performance improvements, they can be compromised in subsequent learning due to distribution discrepancies between generated images and target images.
+
+% 第五段：提出方法 SPIDA
+To address these challenges, we propose a Semantic-Preserving Intermediate Domain Adaptation (SPIDA) method for Medical Image Segmentation.
+First, to construct an effective intermediate domain, we propose a \textbf{Patches Interacting Mapping (PIM)} method. Unlike the B\'ezier curve or SR, PIM introduces information from the original data to the augmented data to preserve semantic information. As observed in Fig. \ref{tsne}, the semantic-preserving intermediate domain constructed by PIM overlaps significantly with the target domain, effectively narrowing the domain gap.
+Second, to mitigate the lack of semantic guidance, we introduce a \textbf{Cross-domain Label Merging Strategy (CLMS)} to generate reliable pseudo-labels that incorporate knowledge from both source and target domains. 
+Third, we introduce \textbf{Dual-domain Semantic Feature Alignment (DSFA)} on the source and target domains simultaneously, further enhancing the segmentation performance in the unlabeled target domain.
+The contributions of this work are summarised as follows:
+\begin{itemize}
+\item We propose a Semantic-Preserving Intermediate Domain Adaptation method for Medical Image Segmentation. Comprehensive comparative experiments on the MMWHS17 and PROMISE12 datasets demonstrate that our proposed method outperforms existing state-of-the-art UDA methods.
+\item We introduce Patches Interacting Mapping to construct a semantic-preserving intermediate domain with diverse data. It introduces information from the original data to the augmented data to preserve semantic information, effectively enhancing the generalization ability and narrowing the domain gap.
+\item We design a Cross-domain Label Merging Strategy to generate reliable pseudo-labels that incorporate knowledge from both source and target domains. This strategy mitigates the lack of semantic guidance in the unlabeled target domain and provides reliable supervision for the model training.
+\item We develop Dual-domain Semantic Feature Alignment to align feature distributions of the source and target domains simultaneously. This module facilitates the learning of domain-invariant features and further enhances the segmentation performance in the unlabeled target domain.
+\end{itemize}
+
+\section{Related Works}
+\subsection{Feature Alignment}
+Feature alignment has attracted widespread attention in UDA for its ability to narrow the gap between the source and target domain, thus ensuring that the learned representations are transferable and effective~\cite{kumari2024deep}. Some methods~\cite{chen2020unsupervised,ji2023unsupervised} rely on adversial learning~\cite{goodfellow2020generative} which ensures that data from different domains cannot be differentiated by the network to implicitly minimizing the discrepancies between domains.
+Explicit feature alignment methods quantify the discrepancies between source and target domains by defining discrepancy metrics or loss functions.
+fang et al.~\cite{fang2021deep} utilize a metric-based method in a multi-center study for transferring prototype representations from the source center to the target center.
+Gomariz et al.~\cite{gomariz2022unsupervised} use both supervised loss and contrastive loss simultaneously for the network training, leveraging the coherence of neighboring slices in a 3D volume. Zheng et al.~\cite{zheng2024dual} utilize the anatomical structures for guiding feature alignment of cross-domain medical images.
+
+% DANN, SIFA, PnP-AdaNet, META Attention
+\subsection{Data Augmentation in UDA}
+Data augmentation techniques are widely used in Machine Learning and Deep Learning for enhancing the generalizing ability of the model. In UDA, data augmentation is used for promoting the network to extract domain-invariant features. Zhou et al.~\cite{zhou2022generalizable} implement a nonlinear transformation based on B\'ezier Curve for data augmentation, enhancing the diversity of source domain for guiding model to better adapt on target domain.
+To improve information flow between different domains, Ma et al.~\cite{ma2024constructing} design a Unified Copy Paste (UCP) for constructing intermediate domain and propose a Random Amplitude MixUp (TP-RAM) Strategy for progressive knowledge transferring.
+Shu et al.~\cite{2023Cross} develop a Cross-Mix Teaching paradigm to provide extra data flexibility, avoiding the Lazy Student Phenomenon in Mean Teacher framework.
+However, both UCP and TP-RAM just simply merge information, leading to a limitation on the generalizing ability of model. Zheng et al.~\cite{zheng2024dual} propose a novel data augmentation based on Shuffle Remap Operation~\cite{kong2023indescribable} to extensively increase diversity of data, greatly improving the adaptation ability of network in unseen target domain. Unfortunately, Shuffle Remap is overly strong for data augmentation, which generates irrelevant domains that differ from target domain or causes severe semantic information destruction, miseading the model from extracting correct domain-invariant features.
+In this work, we propose a novel augmentation method that generates a semantic-preserving intermediate domain for alleviating above issues.
+
+% Dual-Branch GEneralization, Basel for Generalization, Copy Paste(BCP) and Frequent domain augmentation(MiDSS), and Shuffle Remap(DDSP, 23CVPR Estimator).
+\subsection{Pseudo-Labeling in UDA}
+Due to the ability to facilitate learning from limited or imperfect data, pseudo-labeling is frequently employed in semi- and self-supervised learning tasks~\cite{hu2021simple,petrovai2022exploiting,zhang2022weakly}. In UDA, a common strategy is consistency regularization, which compels the model to make consistent predictions on inputs that implemented different disruptions~\cite{wu2023upl,srivastav2022unsupervised}. The Mean Teacher framework~\cite{tarvainen2017mean} is also frequently used to generate pseudo labels for data of unlabeled domains in UDA~\cite{su2024mutual,zhang2024boundary}. To generate high-quality pseudo labels, several post-processing methods based on semantic information~\cite{shin2023sdc,thompson2022pseudo,li2024robust} have been explored. To better adapt pseudo-labeling in UDA for source and target domains, Ma et al.~\cite{ma2024constructing} propose a symmetric Guidance training strategy (SymGD) to merge pseudo labels from the constructed intermediate domain, utilizing information from the source domain to benefit the unlabeled target domain.
+
+\section{Method}
+
+\begin{figure*}[!ht]
+\centering
+\includegraphics[width=\linewidth]{fig/workflow.pdf}
+\caption{The overview of our method, which contains a student model consisting of a shared encoder and a shared decoder, as well as a teacher network with the same structure as the student network for pseudo label generation. (a) Constructing semantic-preserving intermediate domain through our proposed Patch Interacting Mapping (PIM). (b) Feature alignment of the source and target domain. Due to the lack of annotations in the target domain, we calculate the semantic consistency loss based on the produced pseudo labels. (c) Pseudo label generation for unlabeled data from $D_{m}$ and $D_{t}$.}
+\label{workflow}
+\end{figure*}
+
+\subsection{Preliminary}
+In UDA settings, given the labeled source data $D_{s}=\{(x^{i}_{s}, y^{i}_{s}) \}_{i=1}^{N_{s}}$ and the unlabeled target domain data $D_{t}=\{x^{i}_{t}\}_{i=1}^{N_{t}}$, our goal is training the model on the labeled source data $D_{s}$ and the unlabeled target data $D_{t}$ to achieve accurate segmentation on the target domain. The data $x_{s}$ and $x_{t} \in \mathbb{R}^{H \times W \times D}$ are 3D images, with the height of $H$, the width of $W$, and the depth of $D$. $y_{s} \in \mathbb{R}^{C \times H \times W \times D}$ denotes the corresponding ground-truth for $C$ classes of the source domain data. 
+
+\subsection{Overview}
+Fig. \ref{workflow} illustrates the framework of the proposed SPIDA, an Unsupervised Semantic-Preserving Intermediate Domain Adaptation method for medical image segmentation. It consists of three innovative components: Patches Interacting Mapping (PIM), Cross-domain Label Merging Strategy (CLMS), and Dual-domain Semantic Feature Alignment (DSFA).
+
+The overall workflow proceeds as follows. First, taking the labeled source domain data and unlabeled target domain data as inputs, the PIM module constructs a semantic-preserving intermediate domain by interacting patches between the source and target domains. This process enriches data diversity while preserving essential semantic information. Subsequently, the data are fed into a teacher-student framework, where the teacher network generates initial pseudo-labels for the unlabeled data from both the target and intermediate domains. To mitigate the lack of reliable supervision, the CLMS is employed to merge pseudo-labels derived from different domains, generating high-quality pseudo-labels for training. Finally, the student network is optimized using the ground truth of the source domain and the refined pseudo-labels of the unlabeled data via segmentation losses. Meanwhile, the DSFA module imposes a semantic consistency constraint across the source and target domains to align feature distributions, effectively bridging the domain gap and enhancing the model's generalization ability.
+
+\subsection{Patches Interacting Mapping}
+To effectively bridge the domain gap, we propose the Patches Interacting Mapping module. PIM is designed to construct a comprehensive intermediate domain $D_m$ that not only covers diverse style distributions but also enforces structural interaction between the source and target domains.
+First, to explore the potential style variations within each domain, we employ Shuffle Remap~\cite{kong2023indescribable} as a base augmentation. SR randomly remaps pixel intensity ranges to generate augmented views $x_{sa}$ and $x_{ta}$ from the original inputs $x_s$ and $x_t$, effectively expanding the intra-domain feature space.
+Specifically, the distribution of an input $x$ is normalized to $[-1, 1]$ and divided into $N$ segments by randomly generated control points. These segments are then randomly remapped to new ranges, as formulated in Eq.(\ref{eq1}):
+
+\begin{align}  \label{eq1}
+    x'=\frac{x-P_{i}}{P_{i+1}-P_{i}} \times  (P_{j+1}-P_{j}) + P_{j}.
+\end{align}
+
+SR is a completely random remapping method that alters the relative relationships of the overall image distribution. While this capability is beneficial for UDA by significantly enriching data diversity, it inevitably causes severe destruction of semantic information. Relying solely on SR would generate images with distorted structures, potentially misleading the model and hindering the learning of precise semantic boundaries. Furthermore, style augmentation alone does not explicitly model the relationship between the two domains.
+To address this, PIM introduces a cross-domain interaction mechanism via a Copy-Paste strategy~\cite{bai2023bidirectional}. By swapping patches between the source and target domains as well as their SR-augmented counterparts, PIM creates hybrid samples that embed the semantic content of one domain into the contextual style of the other. Formally, given $x_s$, $x_t$, $x_{sa}$, and $x_{ta}$, we generate the intermediate domain samples as follows:
+\begin{align}\label{eq2}
+    \begin{split} 
+       & x_{t\to s} = x_{t} \odot \mathit{M}_{\alpha} + x_{s} \odot (\mathbf{1} - \mathit{M}_{\alpha}),  \\
+       & x_{s\to t} = x_{s} \odot \mathit{M}_{\alpha} + x_{t} \odot (\mathbf{1} - \mathit{M}_{\alpha}), \\
+       & x_{t\to sa} = x_{t} \odot \mathit{M}_{\alpha} + x_{sa} \odot (\mathbf{1} - \mathit{M}_{\alpha}),  \\
+       & x_{s\to ta} = x_{s} \odot \mathit{M}_{\alpha} + x_{ta} \odot (\mathbf{1} - \mathit{M}_{\alpha}), 
+    \end{split} 
+\end{align}
+where $\odot$ denotes element-wise multiplication, and $\mathit{M}_{\alpha} \in \{0, 1\}^{H \times W \times D}$ is a randomly generated one-centered mask indicating the patch region to be swapped.
+Through this interaction, PIM achieves two key objectives: (1) \textbf{Semantic Injection}: $x_{s \to t}$ and $x_{s \to ta}$ inject reliable source semantics along with corresponding ground truth labels into the target-style environment, providing direct supervision in the target domain; (2) \textbf{Contextual Adaptation}: $x_{t \to s}$ and $x_{t \to sa}$ place target patterns into the familiar source environment, helping the model adapt to target textures without losing structural guidance. This results in a semantic-preserving intermediate domain $D_m$ that effectively connects the source and target distributions.
+
+\subsection{Cross-domain Label Merging Strategy}
+To mitigate the lack of semantic guidance in the unlabeled target domain, we propose the Cross-domain Label Merging Strategy (CLMS), which includes pseudo-label generation and a merging strategy. Unlike standard pseudo-labeling methods that rely solely on the model's prediction on the original image, CLMS leverages the constructed intermediate domain to enforce a multi-view consistency constraint, thereby generating high-quality pseudo-labels.
+
+First, we employ a teacher-student framework~\cite{tarvainen2017mean, ma2024constructing,zhang2024mapseg} to provide stable predictions. For any unlabeled input $x$ (from $D_{t}$ or $D_{m}$), the teacher model $f_{t}$ generates a probability map $p = f_{t}(x)$. The initial pseudo-label $\hat{y}$ and the confidence mask $m$ are obtained by:
+\begin{align} \label{eq3}
+    \begin{split} 
+       \hat{y} = \mathop{\arg\max}\limits_{c}(p), \quad m = \mathbb{I}(\max(p) \ge \tau),
+    \end{split} 
+\end{align}
+where $\tau$ is a confidence threshold, $\mathop{\arg\max}(\cdot)$ extracts the class index, and $\mathbb{I}(\cdot)$ is the indicator function. The teacher model $f_{t}$ is updated by the exponential moving average (EMA) of the student model.
+
+Since the intermediate domain images $x_{t\to s}$ and $x_{s\to t}$ are constructed by mixing source and target patches, we can partially utilize the ground truth labels from the source domain. To maximize supervision accuracy, we compose the labels for these mixed images by combining the source ground truth $y_{s}$ with the teacher's predictions for the target regions:
+\begin{align}\label{eq5}
+    \begin{split} 
+           & m_{s\to t}  = \hat{m}_{s \to t}^{raw} \oplus \mathit{M}_{\alpha}, \\
+           & m_{t\to s}  = \hat{m}_{t \to s}^{raw} \oplus (\mathbf{1} - \mathit{M}_{\alpha}),\\
+           & \hat{y}_{s\to t} = y_{s} \odot \mathit{M}_{\alpha} + \hat{y}_{s\to t}^{raw} \odot (\mathbf{1} - \mathit{M}_{\alpha}), \\
+           & \hat{y}_{t\to s} = \hat{y}_{t \to s}^{raw} \odot \mathit{M}_{\alpha} + y_{s} \odot (\mathbf{1} - \mathit{M}_{\alpha}),              
+    \end{split} 
+\end{align}
+where $\hat{y}^{raw}$ and $\hat{m}^{raw}$ denote the initial pseudo-label and mask generated by Eq.(\ref{eq3}). The symbol $\oplus$ represents the pixel-wise OR operation. The modified masks $m_{s\to t}$ and $m_{t\to s}$ trust the ground truth regions implicitly (mask set to 1) and use the confidence mask for target regions. To alleviate information destruction introduced by the strong SR augmentation, the data $x_{t\to sa}$ and $x_{s\to ta}$ share the same pseudo-labels as their SR-free counterparts $x_{t\to s}$ and $x_{s\to t}$, respectively.
+
+Standard pseudo-labeling on the target image $x_{t}$ often suffers from noise due to domain shift. To improve reliability, we introduce a consistency check based on the hypothesis that a robust prediction should remain invariant to contextual changes. We observe the predictions for the target regions under two different contexts: directly from the original image $x_{t}$ and from the mixed images $x_{t\to s}$ and $x_{s\to t}$. 
+\begin{align} \label{eq6}
+    \begin{split} 
+      & \hat{y}_{rec} = \hat{y}_{t\to s} \odot \mathit{M}_{\alpha} + \hat{y}_{s\to t} \odot (\mathbf{1} - \mathit{M}_{\alpha}), \\
+      & m_{rec} = m_{t\to s} \odot \mathit{M}_{\alpha} + m_{s\to t} \odot (\mathbf{1} - \mathit{M}_{\alpha}).
+    \end{split} 
+\end{align}
+Then, we compare this reconstructed label with the direct prediction $\hat{y}_{dir}$ obtained from $x_{t}$. A pixel is considered reliable only if the model makes consistent predictions across both views and exhibits high confidence. The final mask $m_{t}$ is computed as:
+\begin{align} \label{eq_consistency}
+      m_{t} = m_{rec} \odot m_{dir} \odot \mathbb{I}(\hat{y}_{dir} = \hat{y}_{rec}),
+\end{align}
+where $m_{dir}$ is the confidence mask of $x_{t}$. This strict filtering strategy effectively removes unstable predictions prone to context dependency. The final pseudo-label $\hat{y}_{t}$ for $x_{t}$ is set as $\hat{y}_{dir}$.
+
+For labeled data $x_{s}$, we implement the standard dice loss in the training of the student model:
+\begin{align} \label{eq7}
+    L_{D}(y, \hat{y}) = 1 - 2 \frac{\left \| \hat{y} \cdot y  \right \|_{1}}{\left \| \hat{y}  \right \|_{2}^{2} + \left \| y  \right \|_{2}^{2} }, \\
+    L_{Seg}^{s} = \frac{1}{N_{s}} \sum_{i=1}^{N_{s}}(L_{D}(y_{s}^{i}, f(x_{s}^{i}))), 
+\end{align}
+where $ L_{Seg}^{s}$ denotes the loss of the source domain, $N_{s}$ denotes the amount of source domain data for training, $f(\cdot)$ represents the student model. $L_{D}(\cdot, \cdot)$ denotes the standard dice loss.
+
+For unlabeled data $x_{t}$ and augmented data $x_{m} \in D_{m}$, the pseudo labels and confidence masks generated are used as supervision to guide the training student model in the masked dice loss $L_{D}^{mask}(\cdot, \cdot, \cdot)$, expressed as follows:
+\begin{align} \label{eq9}
+    \begin{split}
+         & L_{Seg}^{m} = \frac{1}{N_{m}} \sum_{i=1}^{N_{m}}(L_{D}^{mask}(\hat{y}_{m}^{i}, f(x_{m}^{i}), m_{m}^{i})),  \\
+         & L_{Seg}^{t} = \frac{1}{N_{t}} \sum_{i=1}^{N_{t}}(L_{D}^{mask}(\hat{y}_{t}^{i}, f(x_{t}^{i}), m_{t}^{i})),  \\
+         & L_{D}^{mask}(y, \hat{y}, m) = 1 - 2 \frac{\left \| m \cdot \hat{y} \cdot y  \right \|_{1}}{ m \cdot (\left \| \hat{y}  \right \|_{2}^{2} + \left \| y  \right \|_{2}^{2})},
+    \end{split}
+\end{align}
+where $L_{Seg}^{m}$ denotes the loss of the intermediate domain, $L_{Seg}^{t}$ denotes the loss of the target domain, and $N_{m}$, $N_{t}$ denote the amount of data from the intermediate domain and target domain, separately.
+
+
+\subsection{Dual-domain Semantic Feature Alignment} 
+To minimize the discrepancy of feature distributions and facilitate the model to learn domain-independent knowledge, we propose the Dual-domain Semantic Feature Alignment (DSFA). Specifically, we introduce a semantic consistency loss $L_{sc}$ in both the source and target domains simultaneously, which is computed as follows:
+\begin{align} \label{eq10}
+  L_{sc}(y_{d}, \boldsymbol{F}_{d}, \boldsymbol{F}_{da}) = - \frac{1}{N_{d}} \sum_{i=1}^{N_{d}} 
+  \frac{y_{d}\cdot \boldsymbol{F}_{d} \cdot \boldsymbol{F}_{da}}
+  {\left \| y_{d} \cdot \boldsymbol{F}_{d}  \right \|_{2} \cdot \left \| y_{d} \cdot \boldsymbol{F}_{da}  \right \|_{2}},
+\end{align}
+where $d \in \{s, m, t\}$ denotes the domain that the input data belongs to. $\boldsymbol{F}_{d}$ and $\boldsymbol{F}_{da}$ denote the intermediate features generated by the student model given the input data and the augmented data, respectively. The semantic consistency loss forces the model to align features of data from different domains, thus forcing the model to capture domain-independent representations and alleviate domain shifts.
+
+
+\begin{table*}[!hb]
+\caption{Comparison of different methods on MMWHS17 in CT to MR direction.}
+    \centering
+    % \footnotesize
+    \begin{tabular}{lrrrrrcrrrrr}
+        \toprule
+       % \multicolumn{12}{c}{Multi-Modality Whole Heart Segmentation (CT $\to$ MR)}\\
+        % \midrule
+        \multirow{2}{*}{Method}  & \multicolumn{5}{c}{Dice (\%) $\uparrow$} & & \multicolumn{5}{c}{ASSD $\downarrow$} \\
+        \cmidrule{2-6}  \cmidrule{8-12}
+        & AA & LAC & LVC & MYO & Mean & & AA & LAC & LVC & MYO & Mean \\
+        \midrule
+        Supervised                              & 86.55   & 89.89   & 92.97   & 83.58   & 88.25  &  & 1.65   & 1.08    & 0.84   & 0.86   & 1.11    \\
+        w/o Adaptation                          & 49.49   & 47.02   & 80.18   & 71.38   & 62.01  &  & 8.89   & 10.78   & 4.36   & 2.91   & 6.73   \\
+        \midrule
+        CycleGAN~\cite{CycleGAN2017}            & 53.77   & 51.81   & 69.20   & 54.93   & 57.42  &  & 5.49   & 8.54    & 4.84   & 3.34   & 5.55   \\
+        SIFA~\cite{chen2020unsupervised}        & 70.45   & 63.05   & 63.65   & 70.50   & 66.91  &  & 5.45   & 7.05    & 7.35   & 6.20   & 6.51   \\
+        DAR-UNet~\cite{Yao2022DARUNet}          & 45.59   & 63.12   & 89.19   & 80.68   & 69.65  &  & 7.50   & 6.16    & 1.49   & 1.13   & 4.07   \\
+        DAFormer~\cite{hoyer2022daformer}       & 79.70   & 77.47   & 74.53   & 61.22   & 73.23  &  & 3.48   & 4.67    & 3.08   & 2.25   & 3.37   \\
+        MPSCL~\cite{MPSCL}                      & 68.98   & 77.87   & 88.79   & 75.28   & 77.73  &  & 3.36   & 4.05    & 1.55   & 1.50   & 2.61   \\
+        MiDSS~\cite{ma2024constructing}         & 77.27   & 82.98   & 91.28   & 80.73   & 83.06  &  & 3.22   & 2.24    & 1.04   & 1.11   & 1.90   \\
+        MAPSeg~\cite{zhang2024mapseg}           & 77.07   & 84.56   & 90.92   & 80.16   & 83.18  &  & 4.27   & 1.90    & 1.80   & 1.49   & 2.37   \\
+        DDSP~\cite{zheng2024dual}               & 78.00   & 85.72   & 92.66   & 80.93   & 84.33  &  & 3.57   & 1.36    & 0.75   & 0.96   & 1.66   \\
+        CiSeg~\cite{lv2025ciseg}                & 64.20 & 58.50 & 82.37 & 71.39 & 69.11 &  & 4.78 & 5.28 & 2.58 & 2.03 & 3.67   \\
+        C3R~\cite{ding2025c3r}        & 67.15 & 70.69 & 84.28 & 70.31 & 73.11 &  & 4.36 & 5.82 & 2.93 & 3.42 & 4.13   \\
+        TIG-UDA~\cite{li2025tig}                & 34.65 & 39.39 & 42.87 & 20.55 & 34.37 &  & 10.10 & 9.18 & 6.18 & 5.46 & 7.73   \\
+        SPIDA (ours)                            & \textbf{81.47}   & \textbf{86.80}   & \textbf{92.82}   & \textbf{83.76}   & \textbf{86.21}  &  & \textbf{3.03}   & \textbf{1.22}   & \textbf{0.65}   & \textbf{0.71}   & \textbf{1.40}   \\
+        \midrule
+        \multirow{2}{*}{}  & \multicolumn{5}{c}{JC (\%) $\uparrow$} & & \multicolumn{5}{c}{HD95 $\downarrow$} \\
+        \cmidrule{2-6}  \cmidrule{8-12}
+        & AA & LAC & LVC & MYO & Mean & & AA & LAC & LVC & MYO & Mean \\
+        \midrule
+        Supervised                              & 77.49   & 81.81   & 87.87   & 72.25   & 79.68  &  & 9.51   & 5.42   & 4.38  & 2.91   & 5.55  \\
+        w/o Adaptation                          & 34.73   & 34.15   & 68.91   & 56.43   & 48.55  &  & 32.70  & 39.21  & 24.42 & 13.23  & 27.39 \\
+        \midrule
+        CycleGAN~\cite{CycleGAN2017}            & 37.82   & 36.75   & 53.85   & 38.51   & 41.73  &  & 24.38  & 41.28 & 20.24  & 15.20   & 25.27   \\
+        SIFA~\cite{chen2020unsupervised}        & 55.60   & 47.40   & 50.75   & 55.70   & 52.36  &  & 24.80  & 34.35  & 21.70 & 25.35  & 26.55  \\
+        DAR-UNet~\cite{Yao2022DARUNet}          & 30.77   & 49.32   & 81.19   & 67.70   & 72.12  &  & 27.28  & 26.51  & 7.74  & 3.85   & 16.35  \\
+        DAFormer~\cite{hoyer2022daformer}       & 55.23   & 60.16   & 60.39   & 65.74   & 65.36  &  & 25.51  & 22.09 & 9.81   & 9.63   & 16.76   \\
+        MPSCL~\cite{MPSCL}                      & 55.20   & 64.95   & 80.26   & 60.90   & 65.33  &  & 16.22  & 17.87 & 7.66   & 6.14   & 11.97   \\
+        MiDSS~\cite{ma2024constructing}         & 65.08   & 71.37   & 84.12   & 67.92   & 72.12  &  & \textbf{18.23}  & 8.67  & 5.14   & 3.98  & 9.00   \\
+        MAPSeg~\cite{zhang2024mapseg}           & 63.89   & 73.81   & 83.63   & 67.09   & 72.11  &  & 20.16  & 5.98  & 7.71   & 4.37   & 9.55   \\
+        DDSP~\cite{zheng2024dual}               & 64.92   & 75.32   & 86.45   & 68.22   & 73.73  &  & 21.80  & 6.15  & 3.43   & 3.44   & 8.70   \\
+        CiSeg~\cite{lv2025ciseg}                & 49.14 & 45.54 & 72.96 & 56.20 & 55.96 &  & 21.16 & 22.26 & 9.40 & 8.00 & 15.21   \\
+        C3R~\cite{ding2025c3r}        & 52.58 & 56.20 & 74.06 & 55.00 & 59.46 &  & 18.71 & 30.07 & 13.36 & 20.95 & 20.77     \\
+        TIG-UDA~\cite{li2025tig}                & 23.59 & 26.39 & 28.66 & 11.98 & 22.65 &  & 29.37 & 23.58 & 16.77 & 18.24 & 21.99   \\
+        SPIDA (ours)                            & \textbf{69.78}   & \textbf{76.93}   & \textbf{86.73}   & \textbf{72.20}   & \textbf{76.41} &  & 18.61   & \textbf{4.87}   & \textbf{2.55}   & \textbf{2.56}   & \textbf{7.15}   \\
+        \bottomrule 
+    \end{tabular}
+    \label{compared mmwhs ct2mr}
+\end{table*}
+
+\subsection{Learning Process}
+Following the Mean Teacher Framework~\cite{tarvainen2017mean}, our method consists of teacher and student models, with each model includes the encoder $Enc$ and decoder $Dec$. 
+% In each training iteration, the pseudo labels are firstly produced by the teacher model for feature alignment and segmentation, following the update of encoder $Enc$ using the semantic consistency loss $L_{sc}$. 
+In feature alignment, the student encoder is updated based on the real and pseudo labels using the semantic consistency loss $L_{sc}$.
+The encoder $Enc$ and decoder $Dec$ are then updated based on the segmentation losses, combined as follows:
+\begin{align} \label{eq11}
+  L_{total} = L_{Seg}^{s} + \lambda (L_{Seg}^{m} + L_{Seg}^{t}),
+\end{align}
+where $\lambda$ is a weight coefficient for unlabeled data. At the beginning of training, the teacher model produces noisier labels due to the random initialization, we adopt a time-dependent Gaussian warming-up strategy~\cite{Laine2016TemporalEF} depicted as follows:
+\begin{align} \label{eq12}
+  \lambda(t) = \exp(-5(1-\frac{t}{t_{wp}})^2),
+\end{align}
+where $t$ denotes the current epoch, and $t_{wp}$ denotes the epochs for warming up of the training.
+
+\section{Experiments}
+\subsection{Datasets}
+
+\begin{figure*}[!ht]
+\centering
+\includegraphics[width=1\linewidth]{fig/instances_ct2mr.pdf}
+\caption{Visual results of different methods from the MMWHS17~\cite{zhuang2016multi} dataset in the CT to MR direction, representing that the model is trained by CT images and evaluated by MR images. (a) Cardiac MR images. (b) Ground-truth labels. (c) Baseline model trained with supervised learning. (d) Baseline model trained w/o domain adaptation. (e) SIFA~\cite{chen2020unsupervised}. (f) DAR-UNet~\cite{Yao2022DARUNet}. (g) CycleGAN~\cite{CycleGAN2017}. (h) DAFormer~\cite{hoyer2022daformer}. (I) MPSCL~\cite{MPSCL} (j) MAPSeg~\cite{zhang2024mapseg}. (k) MiDSS~\cite{ma2024constructing}. (l) DDSP~\cite{zheng2024dual}. (m) CiSeg~\cite{lv2025ciseg}. (n) C3R~\cite{ding2025c3r}. (o) TIG-UDA~\cite{li2025tig}. (p) Ours.}
+\label{mmwhs_instance_ct2mr}
+\end{figure*}
+
+\begin{table*}[!ht]
+\caption{Comparison of different methods on MMWHS17 in MR to CT direction.}
+    \centering
+    % \footnotesize
+    \begin{tabular}{lrrrrrcrrrrr}
+        \toprule
+        \multirow{2}{*}{Method}  & \multicolumn{5}{c}{Dice (\%) $\uparrow$} & & \multicolumn{5}{c}{ASSD $\downarrow$} \\
+        \cmidrule{2-6}  \cmidrule{8-12}
+        & AA & LAC & LVC & MYO & Mean & & AA & LAC & LVC & MYO & Mean \\
+        \midrule
+        Supervised                              & 97.50   & 93.94   & 95.06   & 91.45   & 94.49  &  & 0.24   & 0.84    & 0.51   & 0.51   & 0.52    \\
+        w/o Adaptation                          & 82.22   & 80.37   & 79.82   & 71.18   & 78.40  &  & 11.25   & 2.96   & 2.98   & 3.94   & 5.28   \\
+        \midrule
+        CycleGAN~\cite{CycleGAN2017}            & 60.05   & 69.13   & 74.29   & 54.94   & 64.60  &  & 8.25   & 5.99    & 3.01   & 3.41   & 5.16   \\
+        SIFA~\cite{chen2020unsupervised}        & 83.05   & 81.55   & 78.30   & 74.60   & 79.38  &  & 2.35   & 2.40    & 2.80   & 4.05   & 2.90   \\
+        DAR-UNet~\cite{Yao2022DARUNet}          & 56.02   & 62.02   & 89.41   & 84.09   & 72.89  &  & 6.83   & 8.19    & 1.18   & 1.43   & 4.41   \\
+        DAFormer~\cite{hoyer2022daformer}       & 87.87   & 82.40   & 80.32   & 81.23   & 82.96  &  & 3.12   & 1.66    & 1.53   & 1.07   & 1.59   \\
+        MPSCL~\cite{MPSCL}                           & 86.40   & 86.32   & 84.44   & 75.18   & 83.08  &  & 2.15   & 2.10    & 1.66   & 1.41   & 1.83   \\
+        MiDSS~\cite{ma2024constructing}         & 92.37   & 90.26   & 90.72   & 85.09   & 89.61  &  & 2.69   & 1.08    & 0.78   & 0.87   & 1.35   \\
+        MAPSeg~\cite{zhang2024mapseg}           & 94.11   & 92.28   & 90.50   & 86.46   & 90.84  &  & 0.89   & 1.04    & 1.36   & 1.03   & 1.08   \\
+        DDSP~\cite{zheng2024dual}               & 94.92   & \textbf{92.53}   & 91.29   & 85.07   & 90.95  &  & 0.41   & \textbf{0.76}    & 0.80   & 0.89   & 0.71   \\
+        CiSeg~\cite{lv2025ciseg}                & 89.54 & 81.64 & 86.23 & 77.15 & 83.64 &  & 3.30 & 3.44 & 1.61 & 1.68 & 2.51   \\
+        C3R~\cite{ding2025c3r}        & 83.61 & 79.23 & 85.97 & 77.01 & 81.46 &  & 4.61 & 2.98 & 1.97 & 1.74 & 2.82     \\
+        TIG-UDA~\cite{li2025tig}                & 67.64 & 67.01 & 79.52 & 66.10 & 70.07 &  & 4.14 & 4.13 & 2.66 & 2.26 & 3.30   \\
+        SPIDA (ours)                            & \textbf{95.39}   & 91.96   & \textbf{92.92}   & \textbf{88.09}   & \textbf{92.09}  &  & \textbf{0.41}  & 0.87   & \textbf{0.63}   & \textbf{0.68}   & \textbf{0.65}   \\
+        \midrule
+        \multirow{2}{*}{}  & \multicolumn{5}{c}{JC (\%) $\uparrow$} & & \multicolumn{5}{c}{HD95 $\downarrow$} \\
+        \cmidrule{2-6}  \cmidrule{8-12}
+        & AA & LAC & LVC & MYO & Mean & & AA & LAC & LVC & MYO & Mean \\
+        \midrule
+        Supervised                              & 95.13   & 88.84   & 90.65   & 84.42   & 89.76  &  & 1.08   & 4.92    & 1.75   & 1.89   & 2.41    \\
+        w/o Adaptation                          & 70.91   & 68.10   & 68.21   & 55.91   & 65.78  &  & 17.49   & 16.00   & 20.82   & 11.25   & 16.39   \\
+        \midrule
+        CycleGAN~\cite{CycleGAN2017}            & 43.84   & 53.48   & 60.04   & 38.34   & 48.92  &  & 39.13   & 27.86    & 13.08   & 16.15   & 24.05   \\
+        SIFA~\cite{chen2020unsupervised}        & 71.20   & 69.35   & 67.20   & 65.60   & 68.34  &  & 8.70   & 10.45    & 10.15   & 15.15   & 11.11   \\
+        DAR-UNet~\cite{Yao2022DARUNet}          & 41.82   & 49.35   & 81.10   & 73.00   & 61.32  &  & 25.97   & 35.18    & 4.83   & 7.26   & 18.31   \\
+        DAFormer~\cite{hoyer2022daformer}       & 70.23   & 70.58   & 69.71   & 70.01   & 70.13  &  & 20.24   & 7.23    & 5.56   & 5.21   & 9.56   \\
+        MPSCL~\cite{MPSCL}                      & 76.19   & 76.18   & 73.68   & 60.42   & 71.61  &  & 11.16   & 7.54    & 5.20   & 4.46   & 7.09   \\
+        MiDSS~\cite{ma2024constructing}         & 85.98   & 82.40   & 83.43   & 74.22   & 81.51  &  & 21.59   & 5.12    & 2.98   & 3.66   & 8.34   \\
+        MAPSeg~\cite{zhang2024mapseg}           & 88.92   & 85.84   & 83.24   & 76.27   & 83.57  &  & 3.15   & \textbf{3.29}    & 4.82   & 2.99   & 3.56   \\
+        DDSP~\cite{zheng2024dual}               & 90.35   & \textbf{86.29}   & 84.25   & 74.18   & 83.77  &  & 1.50   & 3.45    & 2.90   & 3.18   & 2.76   \\
+        CiSeg~\cite{lv2025ciseg}                & 81.21 & 70.33 & 76.93 & 63.31 & 72.94 &  & 22.29 & 16.00 & 4.78 & 5.38 & 12.11   \\
+        C3R~\cite{ding2025c3r}        & 72.47 & 66.88 & 76.44 & 63.27 & 69.77 &  & 32.31 & 10.79 & 7.93 & 5.90 & 14.23     \\
+        TIG-UDA~\cite{li2025tig}                & 51.69 & 50.89 & 66.76 & 49.76 & 54.78 &  & 14.76 & 10.91 & 8.42 & 6.88 & 10.24   \\
+        SPIDA (ours)                            & \textbf{91.23}   & 85.34   & \textbf{86.94}   & \textbf{78.85}   & \textbf{85.59}  &  & \textbf{1.36}   & 4.22   & \textbf{2.26}   & \textbf{2.46}   & \textbf{2.57}   \\
+        \bottomrule 
+    \end{tabular}
+    \label{compared mmwhs mr2ct}
+\end{table*}
+
+\begin{figure*}[!ht]
+\centering
+\includegraphics[width=1\linewidth]{fig/instances_mr2ct.pdf}
+\caption{Visual results of different methods from the MMWHS17 dataset in the MR to CT direction, representing that the model is trained by CT images and evaluated by MR images. (a) Cardiac CT images. (b) Ground-truth labels. (c) Baseline model trained with supervised learning. (d) Baseline model trained w/o domain adaptation. (e) SIFA~\cite{chen2020unsupervised}. (f) DAR-UNet~\cite{Yao2022DARUNet}. (g) CycleGAN~\cite{CycleGAN2017}. (h) DAFormer~\cite{hoyer2022daformer}. (I) MPSCL~\cite{MPSCL} (j) MAPSeg~\cite{zhang2024mapseg}. (k) MiDSS~\cite{ma2024constructing}. (l) DDSP~\cite{zheng2024dual}. (m) CiSeg~\cite{lv2025ciseg}. (n) C3R~\cite{ding2025c3r}. (o) TIG-UDA~\cite{li2025tig}. (p) Ours.}
+\label{mmwhs_instance_mr2ct}
+\end{figure*}
+
+\begin{table*}[!ht]
+\caption{Comparison of different methods on PROMISE12 for prostate segmentation}
+    \centering
+    % \footnotesize
+    \begin{tabular}{lrrrrrcrrrrr}
+        \toprule
+       % \multicolumn{10}{c}{Prostate Segmentation}\\
+       %  \midrule
+        \multirow{2}{*}{Method}  & \multicolumn{4}{c}{BIDMC $\to$ HK} & & \multicolumn{4}{c}{HK $\to$ BIDMC } \\
+        \cmidrule{2-5}  \cmidrule{7-10}
+        & Dice(\%)$\uparrow$ & JC(\%)$\uparrow$ & HD95$\downarrow$ & ASSD$\downarrow$ & & Dice(\%)$\uparrow$ & JC(\%)$\uparrow$ & HD95$\downarrow$ & ASSD$\downarrow$ \\
+        \midrule
+        Supervised                              & 89.32   & 80.87   & 1.77   & 0.54  &  & 85.32   & 75.16   & 5.43   & 1.02    \\
+        w/o Adaptation                          & 57.49   & 42.58   & 20.84  & 4.96  &  & 54.08   & 38.59   & 22.76  & 5.08   \\
+        \midrule
+        CycleGAN~\cite{CycleGAN2017}            & 34.31   & 21.34   & 30.25  & 6.12  &  & 50.51  & 34.13   & 26.94  & 5.68   \\
+        SIFA~\cite{chen2020unsupervised}        & 55.50   & 40.30   & 7.45   & 2.60  &  & 45.40  & 30.80   & 7.15   & 2.85   \\
+        DAR-UNet~\cite{Yao2022DARUNet}          & 72.63   & 57.69   & 6.50   & 1.91  &  & 79.52  & 66.25   & 3.93   & 1.23   \\
+        DAFormer~\cite{hoyer2022daformer}       & 52.27   & 41.30   & 6.84   & 2.05  &  & 52.13  & 41.17   & 7.59   & 2.81   \\
+        MPSCL~\cite{MPSCL}                      & 82.06   & 70.01   & 3.01   & 0.93  &  & 82.76  & 71.10   & 4.26   & 1.92   \\
+        MiDSS~\cite{ma2024constructing}         & 82.60   & 70.75   & 3.64   & 0.95  &  & 83.97  & 73.10   & 2.98   & \textbf{0.85}   \\
+        MAPSeg~\cite{zhang2024mapseg}           & 80.00   & 66.85   & 5.25   & 1.58  &  & 81.67   & 69.14   & 3.96   & 1.33   \\
+        DDSP~\cite{zheng2024dual}               & 81.99   & 69.93   & 3.27   & 0.98  &  & 76.28   & 62.46   & 4.59   & 1.46   \\
+        CiSeg~\cite{lv2025ciseg}                & 62.79   & 46.46   & 7.72   & 2.60  &  & 69.27   & 54.11   & 5.44   & 2.06   \\
+        C3R~\cite{ding2025c3r}       & 63.40 & 47.12 & 8.15 & 2.48 &  & 55.25 & 38.98 & 15.56 & 3.92   \\
+        TIG-UDA~\cite{li2025tig}                & 57.62   & 41.44   & 7.68   & 2.72  &  & 44.65   & 29.32   & 10.05   & 3.62   \\
+        SPIDA (ours)                            & \textbf{83.95}   & \textbf{72.48}   & \textbf{2.86}   & \textbf{0.85}  &  & \textbf{84.48}   & \textbf{73.27}   & \textbf{2.80}   & 0.87   \\
+        \bottomrule
+    \end{tabular}
+    
+    \label{compared pro12}
+\end{table*}
+
+\subsubsection{MMWHS17}
+We conduct the bidirectional cross-domain segmentation task on the Multi-Modality Whole Heart Segmentation Challenge 2017 (MMWHS17)~\cite{zhuang2016multi}. The MMWHS17 dataset includes 20 CT and 20 MR volumes with annotations. Four cardiac structures including the ascending aorta (AA), the left atrium blood cavity (LAC), the left ventricle blood cavity (LVC), and the myocardium of the left ventricle (MYO) are set as segmentation targets. 
+In the experiment, the dataset is randomly split into 2 folds for cross-validation. In each fold, the source domain includes 20 scans, and the target domain contains 10 scans for training, while the rest of the target domain is for testing. The average performance of the two folds is taken as the final index.
+For preprocessing, we first convert the scans to the RAI orientation and resample them to a size of $96 \times 96 \times 96$. Following the settings in~\cite{zheng2024dual}, the intensity values are clipped within the range of $-100$ to $ 800$ Hounsfield Units (HU). For the MR images, intensity clipping is performed based on the 0.5th and 99.5th percentiles of their values.
+
+\subsubsection{PROMISE12}
+We perform the bidirectional cross-site segmentation task using the PROMISE12 (Pro12) dataset~\cite{liu2020ms}. This dataset contains T2-weighted MR images collected from six data sources.
+
+Following the settings in the MMWHS17 dataset, we randomly split the dataset into two folds for cross-validation. Each fold contains 12 scans of the source domain and 6 scans of the target domain for training, and the rest of the target domain data is set aside for testing. In our experiments, we utilized two centers, BIDMC and HK, for evaluation as in previous works \cite{zheng2024dual} and \cite{sun2022rethinking}.
+For preprocessing, we cropped the scans to focus on the prostate region, and each scan is resampled to a size of $128 \times 128 \times 32$ with RAI orientation.
+
+\begin{figure*}[!ht]
+\centering
+\includegraphics[width=1\linewidth]{fig/instances_BIDMC2HK.pdf}
+\caption{Visual results of different methods from the Pro12 dataset in the BIDMC to HK direction, representing that the model is trained by data from BIDMC and evaluated by data from HK. (a) Prostate MR images from HK. (b) Ground-truth labels. (c) Baseline model trained with supervised learning. (d) Baseline model trained w/o domain adaptation. (e) SIFA~\cite{chen2020unsupervised}. (f) DAR-UNet~\cite{Yao2022DARUNet}. (g) CycleGAN~\cite{CycleGAN2017}. (h) DAFormer~\cite{hoyer2022daformer}. (I) MPSCL~\cite{MPSCL} (j) MAPSeg~\cite{zhang2024mapseg}. (k) MiDSS~\cite{ma2024constructing}. (l) DDSP~\cite{zheng2024dual}. (m) CiSeg~\cite{lv2025ciseg}. (n) C3R~\cite{ding2025c3r}. (o) TIG-UDA~\cite{li2025tig}. (p) Ours. The red parts are the target regions for segmentation. The images in the first column, which are different from the images used in training, are applied contrast enhancement for better visualization.}
+\label{pro12_instance bidmc2hk}
+\end{figure*}
+
+\begin{figure*}[!ht]
+\centering
+\includegraphics[width=1\linewidth]{fig/instances_HK2BIDMC.pdf}
+\caption{Visual results of different methods from the Pro12 dataset in the HK to BIDMC direction, representing that the model is trained by data from HK and evaluated by data from BIDMC. (a) Prostate MR images from BIDMC. (b) Ground-truth labels. (c) Baseline model trained with supervised learning. (d) Baseline model trained w/o domain adaptation. (e) SIFA~\cite{chen2020unsupervised}. (f) DAR-UNet~\cite{Yao2022DARUNet}. (g) CycleGAN~\cite{CycleGAN2017}. (h) DAFormer~\cite{hoyer2022daformer}. (I) MPSCL~\cite{MPSCL} (j) MAPSeg~\cite{zhang2024mapseg}. (k) MiDSS~\cite{ma2024constructing}. (l) DDSP~\cite{zheng2024dual}. (m) CiSeg~\cite{lv2025ciseg}. (n) C3R~\cite{ding2025c3r}. (o) TIG-UDA~\cite{li2025tig}. (p) Ours. The red parts are the target regions for segmentation. The images in the first column, which are different from the images used in training, are applied contrast enhancement for better visualization.}
+\label{pro12_instance hk2bidmc}
+\end{figure*}
+
+\subsection{Implementation Details}
+Our method is implemented on Pytorch platform and an NVIDIA GeForce RTX 4090 GPU. 
+We set the encoder as the entire 3D U-Net~\cite{cciccek20163d}, and the decoder consists of two ResNet blocks and a convolutional layer with an output channel equal to the number of classes.
+We set the number of segments $N$ in PIM as 10, the confidence threshold $\tau = 0.95$, the warming-up epoch $t_{wp} = 100$, the overall epoch is 500 as the default value in experiments. We utilize the Adam optimizer to train the model, and the learning rate is set to $1 \times 10^{-4}$ for the encoder and $5\times 10^{-4}$ for the decoder. The batch size is set to 1 due to the heavy computational burden in 3D image segmentation. 
+In testing, the segmentation results are determined by the student model.
+\begin{table*}
+\caption{Ablation studies of SPIDA components on cardiac structure segmentation. PIM denotes the proposed Patches Interacting Mapping. PS denotes Pseudo Label and Merg denotes the Merging Strategy, which together constitute the Cross-domain Label Merging Strategy (CLMS). DSFA denotes Dual-domain Semantic Feature Alignment. The baseline represents the DDSP method.}
+    \centering
+    % \footnotesize
+    \begin{tabular}[width=1\linewidth]{llllcrrrrcrrrr}
+        \toprule
+        \multicolumn{4}{c}{Components} &  \multicolumn{4}{c}{CT $\to$ MR} & & \multicolumn{4}{c}{MR $\to$ CT} \\
+        \cmidrule{1-4} \cmidrule{6-9} \cmidrule{11-14}
+        PIM & PS & Merg & DSFA & & Dice(\%)$\uparrow$ & JC(\%)$\uparrow$ & HD95$\downarrow$ & ASSD$\downarrow$ & & Dice(\%)$\uparrow$ & JC(\%)$\uparrow$ & HD95$\downarrow$ & ASSD$\downarrow$ \\
+        \midrule
+        &             &            &            & & 84.33 & 73.73 & 8.70 & 1.66 & & 90.95 & 83.77 & 2.76 & 0.71       \\
+        \checkmark &             &            &            & & 84.50 & 73.93 & 8.32 & 1.64 & & 91.16 & 84.03 & 2.73 & 0.70       \\
+        \checkmark & \checkmark  &            &            & & 85.16 & 74.86 & 8.27 & 1.59 & & 89.97 & 82.14 & 3.05 & 0.81       \\
+        \checkmark & \checkmark  & \checkmark &            & & 85.54 & 75.44 & 7.54 & 1.46 & & 90.51 & 83.00 & 2.89 & 0.77       \\
+        \checkmark & \checkmark &            & \checkmark & & 85.21 & 74.98 & 7.57 & 1.47 & & 90.57 & 83.09 & 2.83 & 0.76       \\
+        \checkmark & \checkmark & \checkmark & \checkmark & & \textbf{86.21} & \textbf{76.41} & \textbf{7.15} & \textbf{1.40} &
+                                                                                                  & \textbf{92.09} & \textbf{85.59} & \textbf{2.57} & \textbf{0.64}\\
+        \bottomrule
+    \end{tabular}
+    
+    \label{module ablation}
+\end{table*}
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=1\linewidth]{fig/augment_ablation.pdf}
+\caption{Visual results of different data augmentation methods for generating intermediate domain in training. The first two rows present the results of MR to CT direction for CT images segmentation, and the last two rows show the results of CT to MR direction for MR images segmentation. (a) Input images. (b) Ground-truth labels. (c) Segmentation results of using B\'ezier Curve~\cite{zhou2022generalizable} augmentation. (d) Segmentation results of using Copy-Paste augmentation~\cite{ghiasi2021simple} (e) Segmentation results of using Shuffle Remap (SR)~\cite{kong2023indescribable} augmentation. (f) Segmentation results of using proposed PIM.}
+\label{abl_aug}
+\end{figure}
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=\linewidth]{fig/boxplot ps-label ablation.pdf}
+\caption{Boxplots of the quality of generated pseudo labels under different model settings. (a) shows the Dice score of pseudo labels generated by different methods. (b) shows the Dice score of the reversed direction. The red lines denote the average Dice score without considering outliers.}
+% 因为有离群点，所以红线会更高些。
+\label{pseudo label ablation}
+\end{figure}
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=1\linewidth]{fig/merge_ablation.pdf}
+\caption{Visualization of pseudo labels with or without merging strategy. The first two rows show the generated pseudo labels of CT images in MR to CT direction, while the last two rows show the pseudo labels of MR images in CT to MR direction. (a) The input images. (b) Ground-truth labels. (c) Pseudo labels without merging strategy. (d) Pseudo labels using merging strategy. As can be seen in the first row, the pseudo label without merging strategy cannot capture the whole target region, while that using merging strategy alleviate the problem of misclassification of AA as background. From the second to the fourth rows, compared to the pseudo labels without merging strategy, the pseudo labels generated by merging strategy avoid misclassification of background as LAC and MYO, proving the effectiveness of the domain-assisted cross-domain merging strategy for producing reliable pseudo labels.}
+\label{pseudo label visual}
+\end{figure}
+
+\subsection{Comparison with State-of-the-Art Methods}
+We compare our method with other state-of-the-art (SOTA) UDA methods including CycleGAN~\cite{CycleGAN2017}, SIFA~\cite{chen2020unsupervised}, DAR-UNet~\cite{Yao2022DARUNet}, DAFormer~\cite{hoyer2022daformer}, MPSCL~\cite{MPSCL}, MiDSS~\cite{ma2024constructing}, MAPSeg~\cite{zhang2024mapseg}, DDSP~\cite{zheng2024dual}, CiSeg~\cite{lv2025ciseg}, C3R~\cite{ding2025c3r} and TIG-UDA~\cite{li2025tig} to verify the effectiveness of our proposed SPIDA. 
+For the upper bound, we train and test a supervised model in SPIDA exclusively on the target domain. The lower baseline is a model trained only on the source domain to assess performance in the target domain. The backbone of the upper and lower baselines is the same as that of the student model in our proposed SPIDA. We adopt the Dice coefficient, Jaccard coefficient (JC), 95\% Hausdorff Distance (HD95), and Average Symmetric Surface Distance (ASSD) as evaluation metrics.
+
+\subsubsection{Results on MMWHS17}
+TABLE \ref{compared mmwhs ct2mr} shows the results of the cardiac structure segmentation task in the direction of CT to MR.
+The results demonstrate that our method is effective in multi-class segmentation tasks, surpassing the existing state-of-the-art approaches and achieving optimal performance.
+Compared to the state-of-the-art method~\cite{zheng2024dual}, our method shows improvements of $1.88$. %$ in Dice coefficient, $0.26$ in ASSD, $2.68$\%$ in Jaccard, and $1.55$ in HD95 score. 
+
+To fully evaluate the adaptation ability of our model, we also evaluated our model in the reversed direction of MR to CT, and the results are presented in TABLE \ref{compared mmwhs mr2ct}. Though the performance gap is small than CT to MR, our method still outperforms other state-of-the-art methods in most of the structures segmentation task under different metrics. These results show the strong ability of our method in adapting different domains.
+
+The segmentation results of the MMWHS17 dataset in the direction of CT to MR under different methods are shown in Fig. \ref{mmwhs_instance_ct2mr}, and the results of the reversed direction are shown in Fig. \ref{mmwhs_instance_mr2ct} Compared to the 2D-based methods, owing to the utilization of depth information, 3D segmentation methods have achieved smoother segmentation labels. For example, in the first row of Fig. \ref{mmwhs_instance_ct2mr} and Fig. \ref{mmwhs_instance_mr2ct}, compare the 2D-based MiDSS and the proposed SPIDA, our method makes much accurate segmentations of LVC shown in green. 
+In the meanwhile, comparing our proposed SPIDA and other 3D methods, our method achieves superior segmentation in the unsupervised cross-domain segmentation task. As shown in the second row of Fig. \ref{mmwhs_instance_ct2mr} and Fig. \ref{mmwhs_instance_mr2ct}, compared with the 3D-based DDSP, in the segmentation of AA, the results generated by our method cover more area and are much closer to the ground truth labels. All the results prove the efficacy of our method in cross-domain cardiac structure segmentation task.
+
+\subsubsection{Results on Pro12}
+TABLE \ref{compared pro12} demonstrates the results of single object segmentation in the Pro12 dataset. In the direction of BIDMC to HK, our method outperforms other approaches in all metrics, with the Dice, Jaccard, HD95, and ASSD scores reaching $83.95$\%, $72.48$\%, $2.86$, and $0.85$, respectively. The performance of our model in the prostate segmentation task shows that our model can adapt to the situation of cross-center domain adaptation, utilizing the knowledge from the source center to better fit the segmentation task in unlabeled center. It can be discovered from the experimental results that the GAN-based SIFA and Transformer-based DAFormer show a poor performance in this dataset. This is probably because the foreground to be segmented only occupies $2\%$ of the whole input image, which is difficult for GAN to generate samples in the target domain with high quality. For DAFormer, which is designed for UDA segmentation in natural images, it is hard to extract effective features for prostates that occupy a small part of the images.
+
+As shown in Fig. \ref{pro12_instance bidmc2hk} and Fig. \ref{pro12_instance hk2bidmc}, our method still predicts accurate segmentations for prostates. This result also proves the effectiveness of proposed SPIDA in two-classes UDA segmentation task.
+
+\subsection{Ablation Study}
+\subsubsection{Effectiveness of Components for Segmentation}
+
+To verify the effectiveness of each component, we conduct ablation experiments on the MMWHS17 dataset.
+TABLE \ref{module ablation} presents the quantitative results focusing on PIM, CLMS, and DSFA. The baseline represents the DDSP method. It is worth noting that CLMS consists of pseudo-label generation and a merging strategy. We verify the effectiveness of using only pseudo-label generation as well as the complete CLMS.
+As shown in TABLE \ref{module ablation}, the introduction of PIM yields improvements across most metrics compared to the baseline. When adding the pseudo label generation (PS) to the model with PIM, it can be observed that in the CT to MR task, the model experiences an improvement on all metrics, while the reversed direction witnesses degradation. This suggests that applying pseudo label generation strategy directly may lead to performance degradation due to domain shifts.
+
+From TABLE \ref{module ablation}, when applying the Merging Strategy (Merg) of CLMS and DSFA, it can be observed that the performance of the model further improves. This indicates that our proposed strategies effectively broaden the decision bound and enhance the model's generalization ability for unsupervised cross-domain medical image segmentation.
+
+\begin{table}[!ht]
+\caption{Performance Comparison of Different Data Augmentation}
+    \centering
+    % \footnotesize
+    \begin{tabular}{lllll}
+        \toprule
+      \multicolumn{5}{c}{CT $\to$ MR} \\
+        \midrule 
+         Method & Dice(\%)$\uparrow$ & JC(\%)$\uparrow$ & HD95$\downarrow$ & ASSD$\downarrow$ \\
+        \midrule                      
+        B\'ezier Curve~\cite{zhou2022generalizable}    & 79.48   & 67.42   & 11.48   & 2.43  \\
+        Copy-Paste~\cite{ghiasi2021simple}              & 57.68   & 45.92   & 25.89   & 6.83  \\
+        Shuffle Remap~\cite{kong2023indescribable}     & 84.33   & 73.73   & 8.70    & 1.66 \\
+        PIM(ours)                                      & \textbf{84.50}   & \textbf{73.93}   & \textbf{8.32}    & \textbf{1.64}  \\
+        \bottomrule
+    \\
+        \toprule
+      \multicolumn{5}{c}{MR $\to$ CT} \\
+        \midrule 
+         Method & Dice(\%)$\uparrow$ & JC(\%)$\uparrow$ & HD95$\downarrow$ & ASSD$\downarrow$ \\
+        \midrule                      
+        B\'ezier Curve~\cite{zhou2022generalizable}    & 90.62   & 83.16   & 3.64   & 0.84  \\
+        Copy-Paste~\cite{ghiasi2021simple}              & 89.60   & 81.62   & 4.48   & 0.96  \\
+        Shuffle Remap~\cite{kong2023indescribable}     & 90.95   & 83.77   & 2.76   & 0.71 \\
+        PIM(ours)                                      & \textbf{91.16}   & \textbf{84.03}   & \textbf{2.73}   & \textbf{0.70}  \\
+        \bottomrule
+    \end{tabular}
+    
+    \label{compared aug}
+\end{table}
+
+\begin{figure*}[!ht]
+\centering
+\includegraphics[width=0.9\linewidth]{fig/Weight Ablation all.pdf}
+\caption{Weight value analysis on the cardiac structures segmentation task in all metrics. The first row represents the results from dynamic weights, and the second row shows the results from the fixed weights (a) Dice curves of different warming-up epochs. (b) ASSD curves of warming-up epochs. (c) Dice curves of different fixed weights. (d) ASSD curves of different fixed weights.}
+\label{param ablation}
+\end{figure*}
+
+Fig. \ref{abl_aug} presents the visualization results of different augmentation strategy for producing intermediate domain data. The first two rows show the results of CT images in MR to CT direction, while the last two rows show the results of MR images in the reversed direction. As shown in the red box of the third row, our method produces precise results, capturing the whole AA structure compared to other data augmentation. Additionally, the blue box in the first row demonstrates that our method avoids misclassification of background as foreground, specifically avoiding capturing background as LAC structure compared to other methods.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=0.8\linewidth]{fig/aug instance imgs.pdf}
+\caption{Comparision between generated images from different data augmentation methods includes two directions of B\'ezier curve ~\cite{zhou2022generalizable}, SR~\cite{kong2023indescribable} and the proposed PIM. The ascending B\'ezier curve produces data with similar style to the origin, which is difficult for improving the generalization ability of model. Though SR and the descending B\'eziel curve heavily impact the style of input images, these overly strong augmentation methods tend to destroy semantic information, leading to performance degradation. To alleviate the destruction of semantic information, we introduce patches interacting between the origin domains and the augmented intermediate domains.}
+\label{aug ablation}
+\end{figure}
+
+\subsubsection{Effectiveness of Components for Generating Pseudo Labels}
+To verify the effectiveness of our proposed method for generating high-quality pseudo labels, we conducted the ablation experiments to explore the influence of each component to the pseudo labels. In the experiments, we measure the Dice value of pseudo labels to reveal the corresponding quality.
+
+
+To express more concisely, the model's configuration is abbreviated as follows:
+\begin{itemize}
+    \item \textbf{SRP:} Training with Shuffle Remap augmentation and Mean Teacher framework for pseudo label generation.
+    \item \textbf{SRPA:} Training with Shuffle Remap augmentation and Mean Teacher framework for pseudo label generation with target domain semantic feature alignment.
+    \item \textbf{IMP:} Training with PIM and Mean Teacher framework for pseudo label generation.
+    \item \textbf{IMPA:} Training with PIM and Mean Teacher framework for pseudo label generation with target domain semantic feature alignment.
+    \item \textbf{IMPM:} Training with PIM and Mean Teacher framework for pseudo label generation with cross-domain pseudo labels merging strategy.
+    \item \textbf{FULL:} Training with PIM and Mean Teacher framework for pseudo label generation with the combination of target domain semantic feature alignment and cross-domain pseudo labels merging strategy.
+\end{itemize}
+
+As shown in Fig. \ref{pseudo label ablation} (a), in the CT to MR direction, when we add the proposed components gradually, the Dice values of the pseudo labels increase. In Fig. \ref{pseudo label ablation} (b), it can be observed that the Dice values do not increase much. It may because of the narrower gap in the direction of MR to CT. However, when we add all components to form our proposed SPIDA, the Dice values of pseudo labels reach a peak, proving the effectiveness of each component for generating high-quality pseudo labels.
+
+To evaluate the effectiveness of the cross-domain merging strategy, we present the visualization of pseudo labels using different generation strategy in Fig. \ref{pseudo label visual}. The first two rows present the pseudo labels for CT images, and the last two rows show that of MR images. It can be seen that by applying cross-domain merging strategy, the pseudo labels capture precisely on the AA structure, while avoiding misclassification of bacground as LAC and MYO. These results prove the effectiveness of cross-domain merging strategy for generating reliable pseudo labels in unsupervised cross domain medical image segmentation.
+
+To verify the effectiveness of different data augmentations, we evaluated models trained with different data augmentation methods. The results are presented in TABLE \ref{compared aug}. It can be observed that in the direction of CT $\rightarrow$ MR, models with different augmentation have comparable performances. However, in the reversed direction of MR $\rightarrow$ CT, only the models with SR or PIM achieve high Dice scores. This is because the strong augmentation enables model to learn domain-invariant. 
+
+We visualized the augmented data by different methods in Fig. \ref{aug ablation}. As shown in Fig. \ref{aug ablation} (b) and (c), the descending B\'ezier curve creates totally different style of data, while the ascending one has less impact on image style. As presented in Fig. \ref{aug ablation} (d), though the SR drastically changed the style of the image, it still maintains the semantic information like the cardiac structures. It effectively increases the diversity of data. However, as mentioned in Fig. \ref{aug ablation}, the overly strong augmentation method might destroy semantic information, leading to suboptimal results in UDA. We implement the patches interacting between the SR augmented intermediate domain and the original domain as shown in Fig. \ref{aug ablation} (e), ensuring the diversity of data while alleviating the destruction of semantic information.
+
+\subsubsection{Effectiveness of Weight Parameter}
+We also explore the relationship between the weight parameter $\lambda$ in the loss function and the model performance. In our experiments, the weight parameter $\lambda$ is set to be fixed or following the time-dependent Gaussian warming-up strategy as depicted in Eq.(\ref{eq12}). We evaluated the model with different hyper parameter settings unter Dice, Jaccard, HD95, and ASSD scores mentioned before. As presented in Fig. \ref{param ablation} (a) and (b), the model's performance increases as the warming-up epoch increases when applying the time-dependent Gaussian warming-up strategy. In our experiments, the model's performance reaches its upper limit when the warming-up epoch exceeds 100. Fig. \ref{param ablation} (c) and (d) reports the results of different fixed weight of Eq.(\ref{eq12}). It can be observed that the model's performance peaks at $\lambda=0.1$, revealing that overly small or large $\lambda$ degrades both Dice and ASSD in both direction of CT to MR and MR to CT. It is worth noting that when applying the time-dependent Gaussian warming-up strategy with a warming-pu epoch of 100, our method reaches the Dice of 92.09 in MR to CT, 86.21 in CT to MR, and the ASSD of 0.64 in MR to CT, and 1.40 in CT to MR, outperforming the performance of the fixed weight $\lambda$. This penomenon proves that in an early stage, the teacher model cannot generate reliable pseudo labels, while the quality of the pseudo labels gradually improves during the training process.
+
+\section{Conclusion}
+In this paper, we propose a novel unsupervised domain adaptation method called Constructing Semantic-Preserving Intermediate Domain (SPIDA) for cross-domain medical image segmentation. By utilizing cross-domain knowledge through constructing intermediate domain and pseudo-label merging strategy, SPIDA achieves high generalization ability, thus effectively adapting to the unlabeled target domain. The proposed Dual-domain Semantic Feature Alignment, which fully utilizes the produced pseudo labels, improves the performance of the model by providing accurate guidance on the semantic regions of medical images. The proposed SPIDA was validated on two challenging cross-domain segmentation tasks and outperformed the existing state-of-the-art UDA methods. These contributions underscore the capability of our proposed SPIDA to tackle the intricacies associated with domain adaptation in the field of cross-domain medical image segmentation.
+
+
+\bibliographystyle{IEEEtran}
+\bibliography{IEEEexample}
+
+\vfill
+
+\end{document}
