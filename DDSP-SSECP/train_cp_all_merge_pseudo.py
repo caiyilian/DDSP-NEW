@@ -16,11 +16,8 @@ from utils.utils import (
 from utils import ramps
 import numpy as np
 import surface_distance as surfdist
-from segment_anything import sam_model_registry3D
-from skimage import measure
-import torch.nn.functional as F
-import medim
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+
+# os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 
 def crt_file(path):
     os.makedirs(path, exist_ok=True)
@@ -169,22 +166,9 @@ class DDSPSeg(object):
         self.L_seg_log = AverageMeter(name='L_Seg')
         self.L_fe_log = AverageMeter(name='L_fe')
         self.L_ent_log = AverageMeter(name='L_ent')
-
         # Initialize Prototype Bank for PACCA
         # Feature dim is 8 based on UNet_base default output
         self.proto_bank = PrototypeBank(num_classes=self.n_classes, feature_dim=8, device=self.device)
-
-        # Initialize SAM-Med3D for Boundary Rectification
-        
-        
-        self.sam_model = medim.create_model("SAM-Med3D", pretrained=True, checkpoint_path="./sam_med3d_turbo.pth").to(self.device)
-        # Assuming sam_model_registry3D keys match. vit_b is standard.
-        # self.sam_checkpoint = "./sam_med3d_turbo.pth"
-        # self.sam_model_type = "vit_h"
-        # self.sam_model = sam_model_registry3D[self.sam_model_type](checkpoint=self.sam_checkpoint).to(self.device)
-        self.sam_model.eval()
-        for param in self.sam_model.parameters():
-            param.requires_grad = False
 
     def to_categorical(self, y, num_classes=None):
         y = np.array(y, dtype='int')
@@ -201,36 +185,6 @@ class DDSPSeg(object):
         categorical = np.reshape(categorical, output_shape)
         return categorical
 
-    def get_boxes_from_mask(self, mask_np, margin=5):
-        """
-        Extract 3D bounding boxes from a binary mask.
-        mask_np: (D, H, W) numpy array
-        Returns: tensor of shape (N, 6) with (x1, y1, z1, x2, y2, z2) format
-        """
-        labeled_img, num_features = measure.label(mask_np, connectivity=2, return_num=True)
-        boxes = []
-        if num_features > 0:
-            for i in range(1, num_features + 1):
-                coords = np.argwhere(labeled_img == i)
-                # coords are (z, y, x)
-                z_min, y_min, x_min = coords.min(axis=0)
-                z_max, y_max, x_max = coords.max(axis=0)
-                
-                # Add margin and clip
-                z_min = max(0, z_min - margin)
-                y_min = max(0, y_min - margin)
-                x_min = max(0, x_min - margin)
-                z_max = min(mask_np.shape[0], z_max + margin)
-                y_max = min(mask_np.shape[1], y_max + margin)
-                x_max = min(mask_np.shape[2], x_max + margin)
-                
-                # SAM-Med3D expects x, y, z ??
-                # Based on inference utils: points are x, y, z.
-                # Assuming boxes are x1, y1, z1, x2, y2, z2.
-                boxes.append([x_min, y_min, z_min, x_max, y_max, z_max])
-                
-        return torch.tensor(boxes, dtype=torch.float32)
-
     def get_pseudo_label(self):
         with torch.no_grad():
             # 用于教师模型预测的CP操作样本
@@ -244,93 +198,13 @@ class DDSPSeg(object):
 
             # 目标域图像生成伪标签
             prob_ulb_x_w = self.seg_ema(self.enc_ema(self.tar_img))
-            prob, self.pseudo_label = torch.max(prob_ulb_x_w, dim=1)  # p^w 与 p^hat
-            
-            # --- SAM-Guided Boundary Rectification (SGBR) ---
-            # Process the first sample (batch index 0)
-            sam_input = (self.tar_img[0] + 1.0) / 2.0 # [-1, 1] -> [0, 1]
-            sam_input = sam_input.unsqueeze(0) # (1, 1, D, H, W)
-            
-            # Fix: Pad input to match SAM-Med3D expected size (128x128x128)
-            # Current shape: (1, 1, 32, 128, 128) -> Need (1, 1, 128, 128, 128)
-            # The error (2 vs 8) suggests expected spatial dim is 128 (128/16=8)
-            d_pad = 128 - sam_input.shape[2]
-            h_pad = 128 - sam_input.shape[3]
-            w_pad = 128 - sam_input.shape[4]
-            
-            # F.pad format: (len_last_dim, len_2nd_last_dim, ...) -> (W_left, W_right, H_top, H_bottom, D_front, D_back)
-            # We pad at the end to keep coordinates valid
-            pad_params = (0, max(0, w_pad), 0, max(0, h_pad), 0, max(0, d_pad))
-            
-            if sum(pad_params) > 0:
-                sam_input_padded = F.pad(sam_input, pad_params, "constant", 0)
-            else:
-                sam_input_padded = sam_input
-
-            # Coarse mask for prompting (use lower threshold to capture weak boundaries)
-            coarse_prob = prob[0]
-            coarse_mask_np = (coarse_prob > 0.5).cpu().numpy().astype(int)
-            
-            boxes = self.get_boxes_from_mask(coarse_mask_np)
-            
-            sam_mask_binary = None
-            if len(boxes) > 0:
-                # boxes: (N, 6)
-                # We want to treat each box as a separate prompt for the same image.
-                # So we shape it as (N, 1, 6) -> Batch size = N, 1 box per batch.
-                boxes = boxes.to(self.device).unsqueeze(1) # (N, 1, 6)
-                
-                # SAM Inference
-                # image_embedding: (1, 384, D/16, H/16, W/16)
-                image_embedding = self.sam_model.image_encoder(sam_input_padded)
-                
-                # prompt_encoder will return sparse_embeddings of shape (N, 2, 384)
-                # dense_embeddings of shape (N, 384, D/16, H/16, W/16)
-                sparse_embeddings, dense_embeddings = self.sam_model.prompt_encoder(
-                    points=None,
-                    boxes=boxes,
-                    masks=None,
-                )
-                
-                # mask_decoder detects image_embeddings (B=1) and sparse_embeddings (B=N)
-                # and automatically expands image_embeddings to B=N
-                low_res_masks, _ = self.sam_model.mask_decoder(
-                    image_embeddings=image_embedding,
-                    image_pe=self.sam_model.prompt_encoder.get_dense_pe(),
-                    sparse_prompt_embeddings=sparse_embeddings,
-                    dense_prompt_embeddings=dense_embeddings,
-                    multimask_output=False,
-                )
-                
-                # low_res_masks: (N, 1, D_low, H_low, W_low)
-                # Upscale
-                sam_mask_prob = F.interpolate(low_res_masks, 
-                                              size=sam_input_padded.shape[2:], 
-                                              mode='trilinear', 
-                                              align_corners=False)
-                sam_mask_prob = torch.sigmoid(sam_mask_prob)
-                
-                # Crop back to original size
-                sam_mask_prob = sam_mask_prob[..., :sam_input.shape[2], :sam_input.shape[3], :sam_input.shape[4]]
-                
-                # Union of all box predictions (max across the Batch dimension N)
-                sam_mask_prob = sam_mask_prob.max(dim=0)[0] # (1, D, H, W)
-                sam_mask_binary = (sam_mask_prob > 0.5).squeeze(0) # (D, H, W)
-
+            prob, self.pseudo_label = torch.max(prob_ulb_x_w, dim=1)  # p^w 与 p^hat，实际是啥等后续调试再看
+            # 因为是三维模型，做batch运算则显存肯定不够，干脆去掉batch维度，方便后续处理
+            # 当然，这只是权宜之计，后续得改
+            # 24.12.5  23:08    验证完毕，实际上不转成此形式也可行！
+            # 24.12.6  1:28     没关系了，反正要和DDSP一致，方便操作
             self.pseudo_label = self.pseudo_label[0]
-            
-            # Fusion Strategy
-            if sam_mask_binary is not None:
-                # 1. Trust SAM for structure: Mask out background
-                self.pseudo_label = self.pseudo_label * sam_mask_binary.long()
-                
-                # 2. Update confidence mask
-                # High confidence from student OR SAM's confident foreground
-                original_high_conf = (prob > self.threshold)[0]
-                self.tar_mask = (original_high_conf | sam_mask_binary).float()
-            else:
-                self.tar_mask = (prob > self.threshold)[0].float()  # Fallback
-
+            self.tar_mask = (prob > self.threshold)[0].float()  # 目标域可信度图 w
             self.tar_mask_semantic = (self.pseudo_label & self.tar_mask.bool()).bool()
 
             # 应用了CP的源域图像生成伪标签，也就是说，中间某个块被CP替换成目标域
@@ -426,7 +300,6 @@ class DDSPSeg(object):
         self.latent_b_r = self.enc(self.tar_img_r)
         self.latent_b_cp = self.enc(self.tar_img_cp)
         self.latent_b_r_cp = self.enc(self.tar_img_r_cp)
-
         self.pred_mask_real_a = self.seg(self.latent_a)  #
         self.pred_mask_real_a_cp = self.seg(self.latent_a_cp)
         self.pred_mask_real_a_r = self.seg(self.latent_a_r)  #
